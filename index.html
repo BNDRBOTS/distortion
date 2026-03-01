@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distortion</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #050505;
+            color: #e0e0e0;
+            overflow-x: hidden;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            touch-action: none;
+        }
+        .reveal-layer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.8s ease-out;
+            z-index: 10;
+        }
+        .revealed {
+            opacity: 1;
+        }
+        .ui-overlay {
+            position: fixed;
+            bottom: 2rem;
+            left: 2rem;
+            font-size: 0.75rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #444;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="reveal-text" class="reveal-layer">
+        <h2 class="text-4xl font-light tracking-widest text-white mb-4">Intent Is Obvious</h2>
+        <p class="text-neutral-500 max-w-md mx-auto leading-relaxed">
+            Scatter the pieces to see what moves and what stays.
+        </p>
+    </div>
+
+    <div class="ui-overlay">Phoenix / Scottsdale / Served</div>
+    
+    <canvas id="particleCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('particleCanvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        const revealEl = document.getElementById('reveal-text');
+
+        let particles = [];
+        let mouse = { x: -9999, y: -9999, active: false };
+        let animationFrame;
+        
+        const config = {
+            lines: ["DISTORTION", "IS EVERYWHERE"],
+            baseFontSize: 160,
+            lineHeight: 1.1, 
+            particleDensity: 4,
+            mouseRadius: 100,
+            mouseForce: 15,
+            friction: 0.85,
+            spring: 0.04,
+            revealThreshold: 45,
+        };
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            init();
+        }
+
+        class Particle {
+            constructor(x, y) {
+                this.originX = x;
+                this.originY = y;
+                // Start with slight chaos for impact on load
+                this.x = x + (Math.random() - 0.5) * 100;
+                this.y = y + (Math.random() - 0.5) * 100;
+                this.vx = 0;
+                this.vy = 0;
+                this.size = Math.random() * 1.5 + 0.5;
+                this.density = (Math.random() * 30) + 1;
+            }
+
+            draw() {
+                // FIXED: Brighter output
+                // Removed the displacement-based dimming logic.
+                // We are setting a bright white color with very high opacity (95%)
+                // for all particles all the time.
+                ctx.fillStyle = `rgba(255, 255, 255, 0.95)`;
+                ctx.fillRect(this.x, this.y, this.size, this.size);
+            }
+
+            update() {
+                let dx = this.originX - this.x;
+                let dy = this.originY - this.y;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                
+                this.vx += dx * config.spring;
+                this.vy += dy * config.spring;
+
+                if (mouse.active) {
+                    let mdx = this.x - mouse.x;
+                    let mdy = this.y - mouse.y;
+                    let mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+                    
+                    if (mdist < config.mouseRadius) {
+                        let force = (config.mouseRadius - mdist) / config.mouseRadius;
+                        let moveX = (mdx / mdist) * force * config.mouseForce * this.density;
+                        let moveY = (mdy / mdist) * force * config.mouseForce * this.density;
+                        
+                        this.vx += moveX;
+                        this.vy += moveY;
+                    }
+                }
+
+                this.vx *= config.friction;
+                this.vy *= config.friction;
+                this.x += this.vx;
+                this.y += this.vy;
+
+                return dist;
+            }
+        }
+
+        function init() {
+            particles = [];
+            
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+
+            const maxLineWidth = canvas.width * 0.85; 
+            tempCtx.font = `900 ${config.baseFontSize}px sans-serif`;
+            
+            let longestLine = config.lines.reduce((a, b) => tempCtx.measureText(a).width > tempCtx.measureText(b).width ? a : b);
+            let measuredWidth = tempCtx.measureText(longestLine).width;
+            
+            let fontSize = config.baseFontSize;
+            if (measuredWidth > maxLineWidth) {
+                fontSize = Math.floor(config.baseFontSize * (maxLineWidth / measuredWidth));
+            }
+
+            tempCtx.font = `900 ${fontSize}px sans-serif`;
+            tempCtx.fillStyle = 'white';
+            tempCtx.textAlign = 'center';
+            tempCtx.textBaseline = 'middle';
+
+            const totalHeight = fontSize * config.lines.length * config.lineHeight;
+            const startY = (canvas.height - totalHeight) / 2 + (fontSize / 2);
+
+            config.lines.forEach((line, i) => {
+                const y = startY + (i * fontSize * config.lineHeight);
+                tempCtx.fillText(line, canvas.width / 2, y);
+            });
+
+            const pixels = tempCtx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+            for (let y = 0; y < canvas.height; y += config.particleDensity) {
+                for (let x = 0; x < canvas.width; x += config.particleDensity) {
+                    const index = (y * canvas.width + x) * 4;
+                    if (pixels[index + 3] > 128) {
+                        particles.push(new Particle(x, y));
+                    }
+                }
+            }
+        }
+
+        function animate() {
+            // We use a solid black fill to clear the canvas each frame.
+            ctx.fillStyle = '#050505';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            let totalDisplacement = 0;
+
+            for (let i = 0; i < particles.length; i++) {
+                const disp = particles[i].update();
+                particles[i].draw();
+                totalDisplacement += disp;
+            }
+
+            const avgDisp = totalDisplacement / particles.length;
+            if (avgDisp > config.revealThreshold) {
+                revealEl.classList.add('revealed');
+            } else {
+                revealEl.classList.remove('revealed');
+            }
+
+            animationFrame = requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+            mouse.active = true;
+        });
+
+        window.addEventListener('mousedown', () => config.mouseRadius = 200);
+        window.addEventListener('mouseup', () => config.mouseRadius = 100);
+
+        window.addEventListener('touchstart', (e) => {
+            mouse.active = true;
+            mouse.x = e.touches[0].clientX;
+            mouse.y = e.touches[0].clientY;
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            mouse.x = e.touches[0].clientX;
+            mouse.y = e.touches[0].clientY;
+        });
+
+        window.addEventListener('touchend', () => {
+            mouse.active = false;
+        });
+
+        window.addEventListener('resize', resize);
+
+        window.onload = () => {
+            resize();
+            animate();
+        };
+
+    </script>
+</body>
+</html>
